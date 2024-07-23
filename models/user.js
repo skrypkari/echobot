@@ -35,7 +35,8 @@ const UserSchema = new mongoose.Schema({
   referredBy: { type: String },
   referrals: { type: [String], default: [] },
   waitingForWithdrawAmount: { type: Boolean, default: false },
-  waitingForWalletAddress: { type: Boolean, default: false }
+  waitingForWalletAddress: { type: Boolean, default: false },
+  withdrawAmount: { type: Number, default: null },
 });
 
 module.exports = mongoose.model('User', UserSchema);

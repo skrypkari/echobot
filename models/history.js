@@ -26,6 +26,9 @@ const HistorySchema = new mongoose.Schema({
     enum: ['pending', 'completed', 'failed'],
     default: 'pending'
   },
+  historyId: {
+    type: Number
+  },
   createdAt: {
     type: Date,
     default: Date.now

